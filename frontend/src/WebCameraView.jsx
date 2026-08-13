@@ -21,8 +21,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { normalizeLandmarks } from "./lib/normalize";
 import { extractRawLandmarks } from "./lib/raw_landmarks";
 
-const BACKEND_WS_URL = "ws://localhost:8000/predict";
-const BACKEND_HTTP_URL = "http://localhost:8000";
+// const BACKEND_WS_URL = "ws://localhost:8000/predict";
+// const BACKEND_HTTP_URL = "http://localhost:8000";
+const BACKEND_WS_URL = "wss://ripcord-imaginary-abacus.ngrok-free.dev/predict"; // using ngrok temporarily to host backend
+const BACKEND_HTTP_URL = "https://ripcord-imaginary-abacus.ngrok-free.dev";
 const SMOOTHING_WINDOW = 10;
 const CONFIDENCE_THRESH = 0.80;
 const STABLE_THRESH = 20;
@@ -118,7 +120,7 @@ export default function WebCameraView() {
   };
 
   const drawLandmarks = (ctx, canvas, landmarks) => {
-    ctx.strokeStyle = "#3b82f6";
+    ctx.strokeStyle = "#5B9DFF";
     ctx.lineWidth = 2;
     for (const [a, b] of HAND_CONNECTIONS) {
       const pa = landmarks[a];
@@ -295,43 +297,258 @@ export default function WebCameraView() {
   }, []);
 
   return (
-    <div style={styles.page}>
-      <h1 style={styles.h1}>Sign Buddy</h1>
-      <div style={styles.status}>
-        {status} {mode ? <span style={styles.modeTag}>[{mode}]</span> : null}
+    <div className="sb-page">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
+        :root {
+          --bg: #0B0D10;
+          --panel: #14171B;
+          --panel-border: #262B31;
+          --text-primary: #EDEFF2;
+          --text-secondary: #8A93A0;
+          --accent: #6C8CFF;
+          --accent-warm: #F2B84B;
+        }
+        * { box-sizing: border-box; }
+
+        .sb-page {
+          min-height: 100vh;
+          width: 100%;
+          background: var(--bg);
+          color: var(--text-primary);
+          font-family: 'Manrope', system-ui, sans-serif;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: clamp(20px, 5vw, 44px) 20px 60px;
+        }
+
+        .sb-header {
+          width: 100%;
+          max-width: 720px;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 24px;
+        }
+        .sb-title {
+          font-weight: 800;
+          font-size: clamp(22px, 4vw, 28px);
+          letter-spacing: -0.02em;
+          margin: 0;
+        }
+        .sb-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: var(--text-secondary);
+        }
+        .sb-status-dot {
+          width: 7px; height: 7px;
+          border-radius: 50%;
+          background: var(--text-secondary);
+          transition: background 0.2s ease, box-shadow 0.2s ease;
+        }
+        .sb-status-dot.is-live {
+          background: var(--accent-warm);
+          box-shadow: 0 0 0 3px rgba(242,184,75,0.16);
+        }
+        .sb-mode {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.06em;
+          color: var(--accent);
+          border: 1px solid rgba(108,140,255,0.35);
+          padding: 2px 8px;
+          border-radius: 4px;
+        }
+
+        .sb-video-frame {
+          position: relative;
+          width: 100%;
+          max-width: 720px;
+          aspect-ratio: 4 / 3;
+          border-radius: 10px;
+          overflow: hidden;
+          background: #000;
+          border: 1px solid var(--panel-border);
+        }
+        .sb-video-frame canvas {
+          width: 100%;
+          height: 100%;
+          display: block;
+        }
+        .sb-corner {
+          position: absolute;
+          width: 20px; height: 20px;
+          border: 2px solid var(--accent);
+          opacity: 0.85;
+          z-index: 2;
+          pointer-events: none;
+        }
+        .sb-corner--tl { top: 10px; left: 10px; border-right: none; border-bottom: none; }
+        .sb-corner--tr { top: 10px; right: 10px; border-left: none; border-bottom: none; }
+        .sb-corner--bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
+        .sb-corner--br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
+
+        .sb-readout {
+          width: 100%;
+          max-width: 720px;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 20px;
+          margin-top: 20px;
+          padding: 18px 20px;
+          background: var(--panel);
+          border: 1px solid var(--panel-border);
+          border-radius: 10px;
+        }
+        .sb-letter-tile {
+          width: 60px; height: 60px;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 28px;
+          font-weight: 700;
+          background: #0F1216;
+          border: 1px solid var(--panel-border);
+          border-radius: 8px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        }
+        .sb-meter { flex: 1; min-width: 160px; }
+        .sb-meter-label {
+          display: flex;
+          justify-content: space-between;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 12px;
+          color: var(--text-secondary);
+          margin-bottom: 6px;
+        }
+        .sb-meter-value { color: var(--accent-warm); font-weight: 600; }
+        .sb-meter-track {
+          height: 6px;
+          border-radius: 3px;
+          background: #0F1216;
+          border: 1px solid var(--panel-border);
+          overflow: hidden;
+        }
+        .sb-meter-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--accent), var(--accent-warm));
+          transition: width 0.15s ease;
+        }
+
+        .sb-sentence-panel { width: 100%; max-width: 720px; margin-top: 20px; }
+        .sb-sentence-label {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--text-secondary);
+          margin-bottom: 8px;
+        }
+        .sb-sentence-output {
+          min-height: 48px;
+          background: var(--panel);
+          border: 1px solid var(--panel-border);
+          border-radius: 8px;
+          padding: 12px 16px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 18px;
+          letter-spacing: 0.02em;
+          display: flex;
+          align-items: center;
+          word-break: break-all;
+        }
+        .sb-cursor {
+          display: inline-block;
+          width: 9px; height: 20px;
+          background: var(--accent);
+          margin-left: 3px;
+          animation: sb-blink 1s steps(1) infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .sb-cursor { animation: none; opacity: 0.6; }
+        }
+        @keyframes sb-blink { 50% { opacity: 0; } }
+
+        .sb-actions {
+          width: 100%;
+          max-width: 720px;
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 14px;
+        }
+        .sb-clear-btn {
+          font-family: 'Manrope', sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--text-secondary);
+          background: transparent;
+          border: 1px solid var(--panel-border);
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: color 0.15s ease, border-color 0.15s ease;
+        }
+        .sb-clear-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+        .sb-clear-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      `}</style>
+
+      <div className="sb-header">
+        <h1 className="sb-title">Sign Buddy</h1>
+        <div className="sb-status">
+          <span className={`sb-status-dot ${status === "Connected" ? "is-live" : ""}`} />
+          <span>{status}</span>
+          {mode ? <span className="sb-mode">{mode}</span> : null}
+        </div>
       </div>
 
-      <div style={styles.videoContainer}>
-        <video ref={videoRef} autoPlay playsInline muted style={styles.hiddenVideo} />
-        <canvas ref={canvasRef} style={styles.canvas} />
+      <div className="sb-video-frame">
+        <video ref={videoRef} autoPlay playsInline muted style={{ display: "none" }} />
+        <canvas ref={canvasRef} />
+        <span className="sb-corner sb-corner--tl" />
+        <span className="sb-corner sb-corner--tr" />
+        <span className="sb-corner sb-corner--bl" />
+        <span className="sb-corner sb-corner--br" />
       </div>
 
-      <div style={styles.predictionBar}>
-        <span>{letter || "—"}</span>
-        {confidence != null && (
-          <span style={styles.confidence}>{Math.round(confidence * 100)}%</span>
-        )}
+      <div className="sb-readout">
+        <div className="sb-letter-tile">{letter || "—"}</div>
+        <div className="sb-meter">
+          <div className="sb-meter-label">
+            <span>CONFIDENCE</span>
+            <span className="sb-meter-value">
+              {confidence != null ? `${Math.round(confidence * 100)}%` : "—"}
+            </span>
+          </div>
+          <div className="sb-meter-track">
+            <div
+              className="sb-meter-fill"
+              style={{ width: confidence != null ? `${Math.round(confidence * 100)}%` : "0%" }}
+            />
+          </div>
+        </div>
       </div>
 
-      <div style={styles.sentenceBox}>
-        <label>Spelled so far:</label>
-        <div style={styles.sentence}>{sentence}</div>
-        <button onClick={handleClear}>Clear</button>
+      <div className="sb-sentence-panel">
+        <div className="sb-sentence-label">Spelled so far</div>
+        <div className="sb-sentence-output">
+          {sentence}
+          <span className="sb-cursor" />
+        </div>
+      </div>
+
+      <div className="sb-actions">
+        <button className="sb-clear-btn" onClick={handleClear}>Clear</button>
       </div>
     </div>
   );
 }
-
-const styles = {
-  page: { fontFamily: "system-ui, sans-serif", background: "#111", color: "#eee", textAlign: "center", padding: 20, minHeight: "100vh", width: "100%", boxSizing: "border-box" },
-  h1: { marginBottom: 4 },
-  status: { marginBottom: 12, fontSize: 14, color: "#999" },
-  modeTag: { color: "#80c8e6", marginLeft: 6, fontWeight: "bold" },
-  videoContainer: { position: "relative", display: "inline-block" },
-  hiddenVideo: { position: "absolute", visibility: "hidden", width: 1, height: 1 },
-  canvas: { width: 640, height: 480, borderRadius: 8 },
-  predictionBar: { marginTop: 16, fontSize: 48, fontWeight: "bold" },
-  confidence: { fontSize: 18, color: "#7ce67c", marginLeft: 12 },
-  sentenceBox: { marginTop: 20 },
-  sentence: { fontSize: 24, minHeight: 40, background: "#222", borderRadius: 6, padding: 10, margin: "8px auto", maxWidth: 640 },
-};
