@@ -1,0 +1,5 @@
+{
+  "input_dim": 93,
+  "num_classes": 24,
+  "seed": 42
+}

@@ -1,0 +1,48 @@
+name: SignBuddy-App
+
+services:
+  ml-server:
+    build: ./ml-server
+    container_name: ml-server
+    ports:
+      - "9000:9000"
+    environment:
+      STATIC_MODEL_DIR: models/v2_model
+      STATIC_TYPE: v2
+      SEQ_MODEL_DIR: models/seq_model
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s   # TF + two models (static + seq) to load — more time than before
+
+  backend-ml:
+    build: ./backend-ml
+    container_name: backend
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_MODE: remote
+      ML_SERVER_URL: http://ml-server:9000
+    depends_on:
+      ml-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend-ml:
+        condition: service_healthy

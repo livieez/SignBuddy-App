@@ -1,0 +1,8 @@
+{
+  "window": 30,
+  "stride": 8,
+  "features_per_frame": 126,
+  "arch": "cnn",
+  "use_deltas": true,
+  "motion": true
+}
