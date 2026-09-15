@@ -21,10 +21,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { normalizeLandmarks } from "./lib/normalize";
 import { extractRawLandmarks } from "./lib/raw_landmarks";
 
-// const BACKEND_WS_URL = "ws://localhost:8000/predict";
-// const BACKEND_HTTP_URL = "http://localhost:8000";
-const BACKEND_WS_URL = "wss://ripcord-imaginary-abacus.ngrok-free.dev/predict"; // using ngrok temporarily to host backend
-const BACKEND_HTTP_URL = "https://ripcord-imaginary-abacus.ngrok-free.dev";
+const BACKEND_WS_URL = "ws://localhost:8000/predict";
+const BACKEND_HTTP_URL = "http://localhost:8000";
+// const BACKEND_WS_URL = "wss://ripcord-imaginary-abacus.ngrok-free.dev/predict"; // using ngrok temporarily to host backend
+// const BACKEND_HTTP_URL = "https://ripcord-imaginary-abacus.ngrok-free.dev";
 const SMOOTHING_WINDOW = 10;
 const CONFIDENCE_THRESH = 0.80;
 const STABLE_THRESH = 20;
@@ -46,6 +46,48 @@ const HAND_CONNECTIONS = [
   ...PALM_CONNECTIONS, ...THUMB_CONNECTIONS, ...INDEX_CONNECTIONS,
   ...MIDDLE_CONNECTIONS, ...RING_CONNECTIONS, ...PINKY_CONNECTIONS,
 ];
+
+// Pure helper: given the buffered predictions/confidences, figure out
+// the current "smoothed" letter + confidence via majority vote.
+// Doesn't touch any refs/state — just takes data in, returns data out.
+function computeSmoothedPrediction(predictions, confidences, rawLetter, rawConfidence) {
+  const bufferIsFull = predictions.length === SMOOTHING_WINDOW;
+
+  if (!bufferIsFull) {
+    // Not enough history yet — just pass the raw prediction through.
+    return { letter: rawLetter, confidence: rawConfidence };
+  }
+
+  // 1. Count how many times each letter appears in the buffer
+  const counts = {};
+  for (const l of predictions) {
+    counts[l] = (counts[l] || 0) + 1;
+  }
+
+  // 2. Find the letter with the highest count (majority vote)
+  let winningLetter = null;
+  let winningCount = -1;
+  for (const key of Object.keys(counts)) {
+    if (counts[key] > winningCount) {
+      winningCount = counts[key];
+      winningLetter = key;
+    }
+  }
+
+  // 3. Average the confidence scores, but only for predictions
+  //    that matched the winning letter
+  let sum = 0;
+  let matchCount = 0;
+  for (let i = 0; i < predictions.length; i++) {
+    if (predictions[i] === winningLetter) {
+      sum += confidences[i];
+      matchCount++;
+    }
+  }
+  const avgConfidence = sum / matchCount;
+
+  return { letter: winningLetter, confidence: avgConfidence };
+}
 
 export default function WebCameraView() {
   const videoRef = useRef(null);
@@ -79,42 +121,47 @@ export default function WebCameraView() {
   // ── Smoothing + sentence-building — unified across static/motion, since
   //    both ultimately just produce a letter string, same as
   //    HybridRecognizer._finalize() unifies them server/recognizer-side ──
-  const handlePrediction = (pLetter, pConfidence) => {
-    predBufferRef.current.push(pLetter);
-    confBufferRef.current.push(pConfidence);
+  const handlePrediction = (rawLetter, rawConfidence) => {
+    // Step 1: push the new prediction into the rolling buffers
+    predBufferRef.current.push(rawLetter);
+    confBufferRef.current.push(rawConfidence);
     if (predBufferRef.current.length > SMOOTHING_WINDOW) {
       predBufferRef.current.shift();
       confBufferRef.current.shift();
     }
 
-    let smoothLetter, smoothConf;
-    if (predBufferRef.current.length === SMOOTHING_WINDOW) {
-      const counts = {};
-      for (const l of predBufferRef.current) counts[l] = (counts[l] || 0) + 1;
-      smoothLetter = Object.keys(counts).reduce((a, b) => (counts[a] > counts[b] ? a : b));
-      const matching = confBufferRef.current.filter((_, i) => predBufferRef.current[i] === smoothLetter);
-      smoothConf = matching.reduce((a, b) => a + b, 0) / matching.length;
-    } else {
-      smoothLetter = pLetter;
-      smoothConf = pConfidence;
-    }
+    // Step 2: smooth via majority vote over the buffer
+    const { letter: smoothLetter, confidence: smoothConf } = computeSmoothedPrediction(
+      predBufferRef.current,
+      confBufferRef.current,
+      rawLetter,
+      rawConfidence
+    );
 
-    if (!smoothLetter || smoothConf < CONFIDENCE_THRESH) {
+    // Step 3: below confidence threshold -> show nothing, don't touch stability tracking
+    const isConfident = smoothLetter && smoothConf >= CONFIDENCE_THRESH;
+    if (!isConfident) {
       setLetter("");
       setConfidence(smoothConf);
       return;
     }
 
-    if (smoothLetter === lastAppendedRef.current) {
-      stableCountRef.current++;
-    } else {
+    // Step 4: track how long we've held the same letter
+    const letterChanged = smoothLetter !== lastAppendedRef.current;
+    if (letterChanged) {
       stableCountRef.current = 0;
       lastAppendedRef.current = smoothLetter;
+    } else {
+      stableCountRef.current++;
     }
-    if (stableCountRef.current === STABLE_THRESH) {
+
+    // Step 5: once held stable long enough, commit it to the sentence
+    const justBecameStable = stableCountRef.current === STABLE_THRESH;
+    if (justBecameStable) {
       setSentence((prev) => prev + smoothLetter);
     }
 
+    // Step 6: always update the live display
     setLetter(smoothLetter);
     setConfidence(smoothConf);
   };
