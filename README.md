@@ -1,7 +1,8 @@
 # Sign Buddy
 
-Live ASL fingerspelling recognition — static letters (A-Y, minus J/Z) and
-motion letters (J/Z) via three independent services.
+Live ASL fingerspelling recognition — all 26 letters, combining a static
+model (A-Y, minus J/Z) with a motion model (J/Z) via three independent
+services.
 
 ## Quick start
 
